@@ -3467,5 +3467,106 @@ def main_web():
     app.run(host="0.0.0.0", port=port, debug=False)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# WSGI ENTRY POINT (for Railway / Gunicorn deployment)
+# ══════════════════════════════════════════════════════════════════════════════
+# Create app at module level for WSGI servers like Gunicorn
+_wsgi_app = None
+
+def _create_wsgi_app():
+    """Create and configure Flask app for WSGI deployment."""
+    global _wsgi_app
+    if _wsgi_app is not None:
+        return _wsgi_app
+
+    import csv as _csv
+    import uuid as _uuid
+    from flask import Flask, jsonify, request as flask_request, send_from_directory
+    from flask_cors import CORS
+
+    _DIR = os.path.dirname(os.path.abspath(__file__))
+    app = Flask(__name__, static_folder=_DIR)
+    CORS(app)
+
+    # Import job state and other dependencies
+    _jobs = {}
+    _credits_cache = {"data": None, "timestamp": 0}
+    _CACHE_TTL = 300
+
+    class _JobState:
+        def __init__(self):
+            self.progress = 0
+            self.status_text = "Starting..."
+            self.state = "running"
+            self.logs = []
+            self.log_cursor = 0
+            self.leads = []
+            self.top_csv = ""
+            self.all_csv = ""
+            self.error = ""
+            self.pipeline = None
+            self.api_usage = {}
+
+    def _fetch_credits(force=False):
+        """Fetch API credits - returns dummy data for now"""
+        return {
+            "semrush": {"remaining": 0, "total": 0, "status": "offline"},
+            "serpapi": {"remaining": 0, "total": 0, "status": "offline"},
+            "apollo": {"remaining": 0, "total": 0, "status": "offline"},
+            "lusha": {"remaining": 0, "total": 0, "status": "offline"},
+            "openai": {"remaining": 0, "total": 0, "status": "offline"},
+        }
+
+    # Routes
+    @app.route("/health")
+    def health():
+        return jsonify({"status": "ok", "version": "V5.7"})
+
+    @app.route("/")
+    def serve_index():
+        return send_from_directory(_DIR, "index.html")
+
+    @app.route("/<path:filename>")
+    def serve_static(filename):
+        safe_ext = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".css", ".js", ".webp"}
+        if os.path.splitext(filename)[1].lower() in safe_ext:
+            return send_from_directory(_DIR, filename)
+        return "Not found", 404
+
+    @app.route("/industries")
+    def get_industries():
+        return jsonify({"industries": list(INDUSTRY_KEYWORDS.keys())})
+
+    @app.route("/generate", methods=["POST"])
+    def generate():
+        return jsonify({"error": "Lead generation not available in this deployment"}), 503
+
+    @app.route("/status/<job_id>")
+    def get_status(job_id):
+        return jsonify({"error": "Job not found"}), 404
+
+    @app.route("/cancel", methods=["POST"])
+    def cancel():
+        return jsonify({"status": "no active job"})
+
+    @app.route("/api/credits")
+    def get_credits():
+        return jsonify(_fetch_credits(force=False))
+
+    @app.route("/api/credits/refresh", methods=["POST"])
+    def refresh_credits():
+        return jsonify(_fetch_credits(force=True))
+
+    _wsgi_app = app
+    return app
+
+# Create app for WSGI servers
+try:
+    app = _create_wsgi_app()
+except Exception as e:
+    print(f"Error creating WSGI app: {e}")
+    from flask import Flask
+    app = Flask(__name__)
+
 if __name__ == "__main__":
     main_web()
