@@ -164,6 +164,28 @@ NON_DECISION_MAKER_KEYWORDS = {
     "warehouse", "driver", "delivery", "labourer", "laborer",
 }
 
+# V5.8: Decision-maker role keywords for smart relevance scoring
+# Higher-priority titles that indicate decision-making authority
+DECISION_MAKER_KEYWORDS = {
+    # C-level and ownership
+    "ceo", "cfo", "cto", "coo", "cmо", "chief", "founder", "owner", "partner", "president",
+    # Management titles
+    "director", "manager", "head of", "lead", "senior", "principal", "executive",
+    # Sales/Business development (high commercial intent)
+    "sales", "business development", "account manager", "account executive",
+    # Service delivery leadership
+    "operations", "service", "practice", "managing", "principal consultant",
+}
+
+# Low-relevance keywords (supports/admin - skip expensive enrichment)
+# Note: "officer" removed (too broad - catches "Chief Financial Officer")
+LOW_RELEVANCE_KEYWORDS = {
+    "intern", "apprentice", "trainee", "student", "junior", "support", "assistant",
+    "receptionist", "secretary", "admin", "coordinator",
+    "data entry", "filing", "mail", "delivery", "driver",
+    "warehouse", "technician", "janitor", "custodian", "cleaner",
+}
+
 # ══════════════════════════════════════════════════════════════════════════════
 # INDUSTRY KEYWORD DICTIONARY — 25+ industries with 20-25 keywords each
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1779,6 +1801,81 @@ class WebScraper:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# V5.8: SMART LEAD RELEVANCE SCORING
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _calculate_lead_relevance_score(title: str, has_personal_email: bool = False) -> float:
+    """V5.8: Calculate relevance score for a lead based on title and email.
+
+    Returns a score 0-100 where:
+    - 100 = decision-maker with potential contact info
+    - 50-70 = regular employee/professional
+    - 20-40 = support staff/junior
+    - 0-20 = non-decision makers (interns, etc.)
+
+    Used to prioritize which leads to enrich via expensive API calls.
+    """
+    if not title:
+        return 30  # No title = neutral relevance, skip expensive enrichment
+
+    title_lower = title.lower()
+
+    # Check for low-relevance keywords first
+    low_score = 0
+    for keyword in LOW_RELEVANCE_KEYWORDS:
+        if keyword in title_lower:
+            low_score = max(low_score, 25)
+            break
+
+    if low_score > 0:
+        return low_score  # Low-relevance person, skip enrichment
+
+    # Check for decision-maker keywords
+    decision_score = 0
+    for keyword in DECISION_MAKER_KEYWORDS:
+        if keyword in title_lower:
+            decision_score = max(decision_score, 85)
+            break
+
+    # Boost score if we already have personal email (no need to enrich)
+    if has_personal_email:
+        decision_score += 10
+
+    if decision_score > 0:
+        return min(decision_score, 100)
+
+    # Default: regular professional (not explicitly high or low)
+    return 55
+
+
+def _filter_people_by_relevance(people: list, max_leads: int) -> list:
+    """V5.8: Filter and sort people by relevance to reduce API calls.
+
+    - Calculate relevance score for each person
+    - Keep top N*2 people (accounts for failures/partial data)
+    - Skip low-relevance people entirely (don't make expensive API calls)
+
+    Example: max_leads=20 → keep top ~40-50 people to account for incomplete data
+    """
+    if not max_leads or max_leads <= 0:
+        return people  # No filtering if max_leads not set
+
+    # Score each person
+    scored = []
+    for person in people:
+        title = safe_str(person.get("title", ""))
+        has_email = bool(person.get("personal_emails") or person.get("email"))
+        score = _calculate_lead_relevance_score(title, has_email)
+        scored.append((score, person))
+
+    # Sort by score descending, keep top N*2.5 (with buffer for failures)
+    scored.sort(key=lambda x: x[0], reverse=True)
+    keep_count = max(10, int(max_leads * 2.5))  # Keep at least 10, up to 2.5x max_leads
+
+    return [person for _, person in scored[:keep_count]]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # LEAD GENERATION PIPELINE
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1941,6 +2038,18 @@ class LeadGenerationPipeline:
         gl = self.config["serpapi_gl"]
         all_domains = set()
 
+        # V5.8: Calculate optimal domain cap based on max_leads
+        # If max_leads=20: fetch ~60 domains (~3 per domain after filtering)
+        # If max_leads=0 (all): fetch 150 domains (original behavior)
+        if self.max_leads > 0:
+            # With filtering, we expect ~2.5x buffer on leads
+            # So for max_leads=20, we want ~50 leads total, which means ~20 domains at 2.5 leads/domain
+            optimal_domain_cap = max(30, int(self.max_leads * 3))  # 3 domains per desired lead
+            self._log(f"   V5.8 Smart mode: max_leads={self.max_leads}, domain cap={optimal_domain_cap}")
+        else:
+            optimal_domain_cap = 150  # Default behavior when max_leads=0
+            self._log("   V5.8: max_leads not set, using standard domain discovery (150 cap)")
+
         # Use top keywords for domain discovery
         keywords_to_search = self.keywords[:30]
         total_steps = len(keywords_to_search)
@@ -1976,11 +2085,11 @@ class LeadGenerationPipeline:
             pct = 21 + int((i + 1) / total_steps * 24)
             self._progress(pct, f"Found {len(all_domains)} unique domains")
 
-            if len(all_domains) >= 150:
-                self._log("   Reached domain cap (150). Moving to enrichment.")
+            if len(all_domains) >= optimal_domain_cap:
+                self._log(f"   Reached domain cap ({optimal_domain_cap}). Moving to enrichment.")
                 break
 
-        self.domains = list(all_domains)[:150]
+        self.domains = list(all_domains)[:optimal_domain_cap]
         self._log(f"   Total prospect domains: {len(self.domains)}")
         self._progress(45, f"{len(self.domains)} domains ready for enrichment")
 
@@ -2051,6 +2160,7 @@ class LeadGenerationPipeline:
 
     def _enrich_single_domain(self, domain, index, total):
         """V5.1: Enrich a single domain. Returns list of leads for this domain.
+        V5.8: Smart filtering to reduce API calls for low-relevance leads.
         Thread-safe: does not mutate self.leads, returns results instead."""
         if self._cancelled:
             return []
@@ -2073,6 +2183,13 @@ class LeadGenerationPipeline:
 
         # Step 2: Apollo people search — get names and roles (V5.1: per_page=10, was 25)
         people = self.apollo.search_people_by_domain(domain)
+
+        # V5.8: Smart filtering — reduce people list by relevance before expensive enrichment
+        # This prevents wasting credits on low-relevance leads (interns, support staff, etc.)
+        original_count = len(people)
+        if self.max_leads > 0 and len(people) > 10:
+            people = _filter_people_by_relevance(people, self.max_leads)
+            self._log(f"   V5.8: Filtered {original_count} people → {len(people)} high-relevance (max_leads={self.max_leads})")
         for person in people:
             first = safe_str(person.get("first_name"))
             last = safe_str(person.get("last_name"))
@@ -2151,11 +2268,20 @@ class LeadGenerationPipeline:
                 domain_leads.append(lead)
 
         # Step 2b: V5.7 — Apollo enrich for ALL leads missing personal email
+        # V5.8: Skip enrichment for very low-relevance leads (interns, etc.) to save credits
         # Gate removed: Apollo people/match works with first_name + domain, no last_name required
         # This is the primary path to personal emails (reveal_personal_emails: True)
         for ld in domain_leads:
             if self._lead_is_complete(ld):
                 continue
+
+            # V5.8: Skip enrichment for low-relevance leads when max_leads is set (credit saving)
+            if self.max_leads > 0:
+                role = ld.get("role", "").lower()
+                is_low_relevance = any(kw in role for kw in LOW_RELEVANCE_KEYWORDS)
+                if is_low_relevance:
+                    continue  # Skip expensive enrichment for interns, support staff, etc.
+
             name = ld.get("name", "")
             needs_name = name and " " not in name
             needs_email = not ld.get("email") or not is_personal_email(ld.get("email", ""))
@@ -2179,10 +2305,19 @@ class LeadGenerationPipeline:
                             ld["phone"] = enriched["phone"]
 
         # Step 2c: V5.6 — LinkedIn-URL-targeted enrichment for remaining single-name leads
+        # V5.8: Skip for low-relevance leads to save Apollo credits
         # Only runs when we have a LinkedIn URL (precise match), avoids duplicate first-name-only calls
         for ld in domain_leads:
             if self._lead_is_complete(ld):
                 continue
+
+            # V5.8: Skip enrichment for low-relevance leads when max_leads is set
+            if self.max_leads > 0:
+                role = ld.get("role", "").lower()
+                is_low_relevance = any(kw in role for kw in LOW_RELEVANCE_KEYWORDS)
+                if is_low_relevance:
+                    continue  # Skip expensive enrichment
+
             name = ld.get("name", "")
             linkedin_url = ld.get("_linkedin_url", "")
             if not linkedin_url:
@@ -2234,22 +2369,40 @@ class LeadGenerationPipeline:
                 ld["source"] += "+EmailInfer"
 
         # Step 3: Lusha company data — V5: ALWAYS call Lusha for company info
-        lusha_company = self.lusha.get_company_info(domain)
-        if lusha_company:
-            lusha_co_name = lusha_company.get("company_name", "")
-            if lusha_co_name:
-                company_name = lusha_co_name
-                for ld in domain_leads:
-                    if not ld.get("company"):
-                        ld["company"] = lusha_co_name
-                        ld["source"] += "+Lusha"
+        # V5.8: Skip if no high-relevance leads found (credit optimization)
+        has_high_relevance_leads = any(
+            not any(kw in ld.get("role", "").lower() for kw in LOW_RELEVANCE_KEYWORDS)
+            for ld in domain_leads
+        )
+        if self.max_leads > 0 and not has_high_relevance_leads:
+            # No high-relevance leads found, skip Lusha call to save credits
+            pass
+        else:
+            lusha_company = self.lusha.get_company_info(domain)
+            if lusha_company:
+                lusha_co_name = lusha_company.get("company_name", "")
+                if lusha_co_name:
+                    company_name = lusha_co_name
+                    for ld in domain_leads:
+                        if not ld.get("company"):
+                            ld["company"] = lusha_co_name
+                            ld["source"] += "+Lusha"
 
         # Step 4: Lusha person enrichment — try for ALL leads with a name
+        # V5.8: Skip for low-relevance leads to save Lusha credits
         for ld in domain_leads:
             if self._lead_is_complete(ld):  # V5.1: Skip if already complete
                 continue
             if not ld.get("name"):
                 continue
+
+            # V5.8: Skip Lusha enrichment for low-relevance leads when max_leads is set (major credit save)
+            if self.max_leads > 0:
+                role = ld.get("role", "").lower()
+                is_low_relevance = any(kw in role for kw in LOW_RELEVANCE_KEYWORDS)
+                if is_low_relevance:
+                    continue  # Skip expensive Lusha enrichment for non-decision-makers
+
             parts = ld["name"].split()
             first_n = parts[0]
             last_n = parts[-1] if len(parts) > 1 else ""
