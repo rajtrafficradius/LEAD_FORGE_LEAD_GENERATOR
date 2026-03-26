@@ -3475,7 +3475,14 @@ from flask_cors import CORS
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder=_DIR)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type"]}})
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return response
 
 # Routes for WSGI deployment
 @app.route("/health")
@@ -3521,14 +3528,22 @@ def cancel():
 
 @app.route("/api/credits")
 def get_credits():
-    data = {
-        "semrush": {"remaining": 0, "total": 0, "status": "offline"},
-        "serpapi": {"remaining": 0, "total": 0, "status": "offline"},
-        "apollo": {"remaining": 0, "total": 0, "status": "offline"},
-        "lusha": {"remaining": 0, "total": 0, "status": "offline"},
-        "openai": {"remaining": 0, "total": 0, "status": "offline"},
-    }
-    return jsonify(data)
+    try:
+        data = {
+            "semrush": {"remaining": 0, "total": 0, "status": "offline"},
+            "serpapi": {"remaining": 0, "total": 0, "status": "offline"},
+            "apollo": {"remaining": 0, "total": 0, "status": "offline"},
+            "lusha": {"remaining": 0, "total": 0, "status": "offline"},
+            "openai": {"remaining": 0, "total": 0, "status": "offline"},
+        }
+        response = jsonify(data)
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Content-Type'] = 'application/json'
+        return response
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/credits/refresh", methods=["POST"])
 def refresh_credits():
