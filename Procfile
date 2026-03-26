@@ -1,1 +1,1 @@
-web: python V5.py
+web: gunicorn -w 1 -b 0.0.0.0:$PORT V5:app
