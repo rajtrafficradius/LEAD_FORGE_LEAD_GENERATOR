@@ -3553,38 +3553,49 @@ def get_credits():
                 "status": "offline",
                 "used": 0,
                 "total": 1000,
-                "pct_remaining": 100
+                "pct_remaining": 100,
+                "searches_remaining": 1000
             },
             "lusha": {
                 "service": "Lusha",
                 "status": "offline",
                 "used": 0,
                 "total": 1000,
-                "pct_remaining": 100
+                "pct_remaining": 100,
+                "searches_remaining": 1000
             },
             "semrush": {
                 "service": "SEMrush",
                 "status": "offline",
                 "used": 0,
                 "total": 50000,
-                "pct_remaining": 100
+                "pct_remaining": 100,
+                "searches_remaining": 50000
             },
             "serpapi": {
                 "service": "SerpAPI",
                 "status": "offline",
                 "used": 0,
                 "total": 10000,
-                "pct_remaining": 100
+                "pct_remaining": 100,
+                "searches_remaining": 10000
             },
             "openai": {
                 "service": "OpenAI",
                 "status": "offline",
                 "used": 0,
                 "total": 5000,
-                "pct_remaining": 100
+                "pct_remaining": 100,
+                "searches_remaining": 5000
             }
         }
-        data = {"services": services}
+        data = {
+            "services": services,
+            "total_searches_remaining": 77000,
+            "timestamp": time.time(),
+            "cached": False,
+            "alerts": []
+        }
         response = jsonify(data)
         response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Content-Type'] = 'application/json'
@@ -3596,6 +3607,7 @@ def get_credits():
 
 @app.route("/api/credits/refresh", methods=["POST"])
 def refresh_credits():
+    print("[API] POST /api/credits/refresh", flush=True)
     try:
         services = {
             "apollo": {
@@ -3603,38 +3615,49 @@ def refresh_credits():
                 "status": "offline",
                 "used": 0,
                 "total": 1000,
-                "pct_remaining": 100
+                "pct_remaining": 100,
+                "searches_remaining": 1000
             },
             "lusha": {
                 "service": "Lusha",
                 "status": "offline",
                 "used": 0,
                 "total": 1000,
-                "pct_remaining": 100
+                "pct_remaining": 100,
+                "searches_remaining": 1000
             },
             "semrush": {
                 "service": "SEMrush",
                 "status": "offline",
                 "used": 0,
                 "total": 50000,
-                "pct_remaining": 100
+                "pct_remaining": 100,
+                "searches_remaining": 50000
             },
             "serpapi": {
                 "service": "SerpAPI",
                 "status": "offline",
                 "used": 0,
                 "total": 10000,
-                "pct_remaining": 100
+                "pct_remaining": 100,
+                "searches_remaining": 10000
             },
             "openai": {
                 "service": "OpenAI",
                 "status": "offline",
                 "used": 0,
                 "total": 5000,
-                "pct_remaining": 100
+                "pct_remaining": 100,
+                "searches_remaining": 5000
             }
         }
-        data = {"services": services}
+        data = {
+            "services": services,
+            "total_searches_remaining": 77000,
+            "timestamp": time.time(),
+            "cached": False,
+            "alerts": []
+        }
         return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
