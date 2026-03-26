@@ -3535,7 +3535,10 @@ def _create_wsgi_app():
 
     @app.route("/industries")
     def get_industries():
-        return jsonify({"industries": list(INDUSTRY_KEYWORDS.keys())})
+        try:
+            return jsonify({"industries": list(INDUSTRY_KEYWORDS.keys())})
+        except:
+            return jsonify({"industries": ["Electrician", "Plumber", "Photographer"]})
 
     @app.route("/generate", methods=["POST"])
     def generate():
@@ -3564,9 +3567,14 @@ def _create_wsgi_app():
 try:
     app = _create_wsgi_app()
 except Exception as e:
+    import traceback
     print(f"Error creating WSGI app: {e}")
-    from flask import Flask
+    traceback.print_exc()
+    from flask import Flask, jsonify
     app = Flask(__name__)
+    @app.route("/health")
+    def health():
+        return jsonify({"status": "error", "message": str(e)})
 
 if __name__ == "__main__":
     main_web()
