@@ -3470,111 +3470,76 @@ def main_web():
 # ══════════════════════════════════════════════════════════════════════════════
 # WSGI ENTRY POINT (for Railway / Gunicorn deployment)
 # ══════════════════════════════════════════════════════════════════════════════
-# Create app at module level for WSGI servers like Gunicorn
-_wsgi_app = None
+from flask import Flask, jsonify, request as flask_request, send_from_directory
+from flask_cors import CORS
 
-def _create_wsgi_app():
-    """Create and configure Flask app for WSGI deployment."""
-    global _wsgi_app
-    if _wsgi_app is not None:
-        return _wsgi_app
+_DIR = os.path.dirname(os.path.abspath(__file__))
+app = Flask(__name__, static_folder=_DIR)
+CORS(app)
 
-    import csv as _csv
-    import uuid as _uuid
-    from flask import Flask, jsonify, request as flask_request, send_from_directory
-    from flask_cors import CORS
+# Routes for WSGI deployment
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok", "version": "V5.7"})
 
-    _DIR = os.path.dirname(os.path.abspath(__file__))
-    app = Flask(__name__, static_folder=_DIR)
-    CORS(app)
-
-    # Import job state and other dependencies
-    _jobs = {}
-    _credits_cache = {"data": None, "timestamp": 0}
-    _CACHE_TTL = 300
-
-    class _JobState:
-        def __init__(self):
-            self.progress = 0
-            self.status_text = "Starting..."
-            self.state = "running"
-            self.logs = []
-            self.log_cursor = 0
-            self.leads = []
-            self.top_csv = ""
-            self.all_csv = ""
-            self.error = ""
-            self.pipeline = None
-            self.api_usage = {}
-
-    def _fetch_credits(force=False):
-        """Fetch API credits - returns dummy data for now"""
-        return {
-            "semrush": {"remaining": 0, "total": 0, "status": "offline"},
-            "serpapi": {"remaining": 0, "total": 0, "status": "offline"},
-            "apollo": {"remaining": 0, "total": 0, "status": "offline"},
-            "lusha": {"remaining": 0, "total": 0, "status": "offline"},
-            "openai": {"remaining": 0, "total": 0, "status": "offline"},
-        }
-
-    # Routes
-    @app.route("/health")
-    def health():
-        return jsonify({"status": "ok", "version": "V5.7"})
-
-    @app.route("/")
-    def serve_index():
+@app.route("/")
+def serve_index():
+    try:
         return send_from_directory(_DIR, "index.html")
+    except Exception as e:
+        return str(e), 500
 
-    @app.route("/<path:filename>")
-    def serve_static(filename):
-        safe_ext = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".css", ".js", ".webp"}
-        if os.path.splitext(filename)[1].lower() in safe_ext:
-            return send_from_directory(_DIR, filename)
-        return "Not found", 404
-
-    @app.route("/industries")
-    def get_industries():
+@app.route("/<path:filename>")
+def serve_static(filename):
+    safe_ext = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".css", ".js", ".webp"}
+    if os.path.splitext(filename)[1].lower() in safe_ext:
         try:
-            return jsonify({"industries": list(INDUSTRY_KEYWORDS.keys())})
+            return send_from_directory(_DIR, filename)
         except:
-            return jsonify({"industries": ["Electrician", "Plumber", "Photographer"]})
+            return "Not found", 404
+    return "Not found", 404
 
-    @app.route("/generate", methods=["POST"])
-    def generate():
-        return jsonify({"error": "Lead generation not available in this deployment"}), 503
+@app.route("/industries")
+def get_industries():
+    try:
+        industries = list(INDUSTRY_KEYWORDS.keys())
+        return jsonify({"industries": industries})
+    except Exception as e:
+        return jsonify({"industries": ["Electrician", "Plumber", "Photographer"], "error": str(e)})
 
-    @app.route("/status/<job_id>")
-    def get_status(job_id):
-        return jsonify({"error": "Job not found"}), 404
+@app.route("/generate", methods=["POST"])
+def generate():
+    return jsonify({"error": "Lead generation not available in this deployment"}), 503
 
-    @app.route("/cancel", methods=["POST"])
-    def cancel():
-        return jsonify({"status": "no active job"})
+@app.route("/status/<job_id>")
+def get_status(job_id):
+    return jsonify({"error": "Job not found"}), 404
 
-    @app.route("/api/credits")
-    def get_credits():
-        return jsonify(_fetch_credits(force=False))
+@app.route("/cancel", methods=["POST"])
+def cancel():
+    return jsonify({"status": "no active job"})
 
-    @app.route("/api/credits/refresh", methods=["POST"])
-    def refresh_credits():
-        return jsonify(_fetch_credits(force=True))
+@app.route("/api/credits")
+def get_credits():
+    data = {
+        "semrush": {"remaining": 0, "total": 0, "status": "offline"},
+        "serpapi": {"remaining": 0, "total": 0, "status": "offline"},
+        "apollo": {"remaining": 0, "total": 0, "status": "offline"},
+        "lusha": {"remaining": 0, "total": 0, "status": "offline"},
+        "openai": {"remaining": 0, "total": 0, "status": "offline"},
+    }
+    return jsonify(data)
 
-    _wsgi_app = app
-    return app
-
-# Create app for WSGI servers
-try:
-    app = _create_wsgi_app()
-except Exception as e:
-    import traceback
-    print(f"Error creating WSGI app: {e}")
-    traceback.print_exc()
-    from flask import Flask, jsonify
-    app = Flask(__name__)
-    @app.route("/health")
-    def health():
-        return jsonify({"status": "error", "message": str(e)})
+@app.route("/api/credits/refresh", methods=["POST"])
+def refresh_credits():
+    data = {
+        "semrush": {"remaining": 0, "total": 0, "status": "offline"},
+        "serpapi": {"remaining": 0, "total": 0, "status": "offline"},
+        "apollo": {"remaining": 0, "total": 0, "status": "offline"},
+        "lusha": {"remaining": 0, "total": 0, "status": "offline"},
+        "openai": {"remaining": 0, "total": 0, "status": "offline"},
+    }
+    return jsonify(data)
 
 if __name__ == "__main__":
     main_web()
