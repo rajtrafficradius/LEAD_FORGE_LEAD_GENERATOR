@@ -1,11 +1,31 @@
 """WSGI entry point - Flask app defined here"""
 import os
 import time
-from flask import Flask, jsonify, send_from_directory
+import csv as _csv
+import uuid as _uuid
+import threading
+from flask import Flask, jsonify, send_from_directory, request
 
 # Create Flask app
 _DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder=_DIR)
+
+# Job management
+_jobs = {}
+
+class JobState:
+    def __init__(self):
+        self.progress = 0
+        self.status_text = "Starting..."
+        self.state = "running"
+        self.logs = []
+        self.log_cursor = 0
+        self.leads = []
+        self.top_csv = ""
+        self.all_csv = ""
+        self.error = ""
+        self.pipeline = None
+        self.api_usage = {}
 
 # Configure CORS
 @app.after_request
@@ -132,36 +152,119 @@ def refresh_credits():
 @app.route("/generate", methods=["POST"])
 def generate():
     try:
-        from flask import request
-        data = request.get_json() or {}
-        return jsonify({
-            "job_id": "demo-job-001",
-            "status": "running",
-            "message": "Lead generation started"
-        }), 202
+        from V5 import LeadGenerationPipeline
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        industry = data.get("industry", "")
+        country = data.get("country", "AU")
+        min_volume = int(data.get("min_volume", 100))
+        min_cpc = float(data.get("min_cpc", 1.0))
+        max_leads = int(data.get("max_leads", 0))
+
+        if not industry:
+            return jsonify({"error": "Industry is required"}), 400
+
+        job_id = str(_uuid.uuid4())[:8]
+        job = JobState()
+        _jobs[job_id] = job
+        output_folder = os.path.join(_DIR, "output", job_id)
+        os.makedirs(output_folder, exist_ok=True)
+
+        def progress_cb(pct, status=""):
+            job.progress = pct
+            if status:
+                job.status_text = status
+
+        def log_cb(message):
+            job.logs.append(message)
+
+        pipeline = LeadGenerationPipeline(
+            industry=industry, country=country, min_volume=min_volume,
+            min_cpc=min_cpc, output_folder=output_folder,
+            progress_callback=progress_cb, log_callback=log_cb, max_leads=max_leads,
+        )
+        job.pipeline = pipeline
+
+        def run():
+            try:
+                job.progress = 1
+                job.status_text = "Initializing pipeline..."
+                job.logs.append("[SYSTEM] Pipeline initialized, starting Phase 1...")
+                result_path = pipeline.run()
+                job.api_usage = pipeline._api_counter.copy()
+                if pipeline._cancelled:
+                    job.state = "cancelled"
+                    return
+                if result_path and os.path.exists(result_path):
+                    with open(result_path, "r", encoding="utf-8") as f:
+                        job.top_csv = f.read()
+                    with open(result_path, "r", encoding="utf-8") as f:
+                        reader = _csv.DictReader(f)
+                        for row in reader:
+                            job.leads.append({
+                                "name": row.get("Name", ""),
+                                "company": row.get("Company Name", ""),
+                                "domain": row.get("Domain", ""),
+                                "role": row.get("Role", ""),
+                                "email": row.get("Email", ""),
+                                "phone": row.get("Phone Number", ""),
+                                "email_type": row.get("Email Type", ""),
+                            })
+                    for fname in os.listdir(output_folder):
+                        if fname.startswith("leads_ALL_") and fname.endswith(".csv"):
+                            with open(os.path.join(output_folder, fname), "r", encoding="utf-8") as f:
+                                job.all_csv = f.read()
+                            break
+                    job.state = "done"
+                else:
+                    job.state = "done" if not pipeline._cancelled else "cancelled"
+            except Exception as e:
+                job.error = str(e)
+                job.state = "error"
+
+        threading.Thread(target=run, daemon=True).start()
+        return jsonify({"job_id": job_id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/status/<job_id>")
 def get_status(job_id):
     try:
-        return jsonify({
-            "state": "done",
-            "progress": 100,
-            "status_text": "Completed",
-            "new_logs": ["Demo job completed"],
-            "leads": [],
-            "top_csv": "",
-            "all_csv": "",
-            "api_usage": {}
-        })
+        job = _jobs.get(job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        new_logs = job.logs[job.log_cursor:]
+        job.log_cursor = len(job.logs)
+        result = {
+            "state": job.state,
+            "progress": job.progress,
+            "status_text": job.status_text,
+            "new_logs": new_logs
+        }
+        if job.state == "done":
+            result["leads"] = job.leads
+            result["top_csv"] = job.top_csv
+            result["all_csv"] = job.all_csv
+            result["api_usage"] = job.api_usage
+        if job.state == "error":
+            result["error"] = job.error
+            result["api_usage"] = job.api_usage
+        return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/cancel", methods=["POST"])
 def cancel():
     try:
-        return jsonify({"status": "no active job", "success": True})
+        for jid in reversed(list(_jobs.keys())):
+            j = _jobs[jid]
+            if j.state == "running" and j.pipeline:
+                j.pipeline.cancel()
+                return jsonify({"status": "cancelling"})
+        return jsonify({"status": "no active job"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
