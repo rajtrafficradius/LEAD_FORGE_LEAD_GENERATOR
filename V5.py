@@ -3529,13 +3529,44 @@ def cancel():
 @app.route("/api/credits")
 def get_credits():
     try:
-        data = {
-            "semrush": {"remaining": 0, "total": 0, "status": "offline"},
-            "serpapi": {"remaining": 0, "total": 0, "status": "offline"},
-            "apollo": {"remaining": 0, "total": 0, "status": "offline"},
-            "lusha": {"remaining": 0, "total": 0, "status": "offline"},
-            "openai": {"remaining": 0, "total": 0, "status": "offline"},
+        services = {
+            "apollo": {
+                "service": "Apollo",
+                "status": "offline",
+                "used": 0,
+                "total": 1000,
+                "pct_remaining": 100
+            },
+            "lusha": {
+                "service": "Lusha",
+                "status": "offline",
+                "used": 0,
+                "total": 1000,
+                "pct_remaining": 100
+            },
+            "semrush": {
+                "service": "SEMrush",
+                "status": "offline",
+                "used": 0,
+                "total": 50000,
+                "pct_remaining": 100
+            },
+            "serpapi": {
+                "service": "SerpAPI",
+                "status": "offline",
+                "used": 0,
+                "total": 10000,
+                "pct_remaining": 100
+            },
+            "openai": {
+                "service": "OpenAI",
+                "status": "offline",
+                "used": 0,
+                "total": 5000,
+                "pct_remaining": 100
+            }
         }
+        data = {"services": services}
         response = jsonify(data)
         response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Content-Type'] = 'application/json'
@@ -3547,14 +3578,48 @@ def get_credits():
 
 @app.route("/api/credits/refresh", methods=["POST"])
 def refresh_credits():
-    data = {
-        "semrush": {"remaining": 0, "total": 0, "status": "offline"},
-        "serpapi": {"remaining": 0, "total": 0, "status": "offline"},
-        "apollo": {"remaining": 0, "total": 0, "status": "offline"},
-        "lusha": {"remaining": 0, "total": 0, "status": "offline"},
-        "openai": {"remaining": 0, "total": 0, "status": "offline"},
-    }
-    return jsonify(data)
+    try:
+        services = {
+            "apollo": {
+                "service": "Apollo",
+                "status": "offline",
+                "used": 0,
+                "total": 1000,
+                "pct_remaining": 100
+            },
+            "lusha": {
+                "service": "Lusha",
+                "status": "offline",
+                "used": 0,
+                "total": 1000,
+                "pct_remaining": 100
+            },
+            "semrush": {
+                "service": "SEMrush",
+                "status": "offline",
+                "used": 0,
+                "total": 50000,
+                "pct_remaining": 100
+            },
+            "serpapi": {
+                "service": "SerpAPI",
+                "status": "offline",
+                "used": 0,
+                "total": 10000,
+                "pct_remaining": 100
+            },
+            "openai": {
+                "service": "OpenAI",
+                "status": "offline",
+                "used": 0,
+                "total": 5000,
+                "pct_remaining": 100
+            }
+        }
+        data = {"services": services}
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     main_web()
