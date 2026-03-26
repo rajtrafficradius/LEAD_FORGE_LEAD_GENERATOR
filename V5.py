@@ -3470,19 +3470,12 @@ def main_web():
 # ══════════════════════════════════════════════════════════════════════════════
 # WSGI ENTRY POINT (for Railway / Gunicorn deployment)
 # ══════════════════════════════════════════════════════════════════════════════
-print("[V5] Loading WSGI entry point...", flush=True)
-
 from flask import Flask, jsonify, request as flask_request, send_from_directory
 from flask_cors import CORS
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
-print(f"[V5] Project directory: {_DIR}", flush=True)
-
 app = Flask(__name__, static_folder=_DIR)
-print(f"[V5] Flask app created: {app.name}", flush=True)
-
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type"]}})
-print("[V5] CORS enabled", flush=True)
 
 @app.after_request
 def add_cors_headers(response):
@@ -3492,25 +3485,15 @@ def add_cors_headers(response):
     return response
 
 # Routes for WSGI deployment
-print("[V5] Registering routes...", flush=True)
-
 @app.route("/health")
 def health():
-    print("[API] GET /health", flush=True)
     return jsonify({"status": "ok", "version": "V5.7"})
 
 @app.route("/")
 def serve_index():
-    print("[API] GET /", flush=True)
     try:
-        index_path = os.path.join(_DIR, "index.html")
-        print(f"[API] Serving index.html from: {index_path}", flush=True)
-        print(f"[API] File exists: {os.path.exists(index_path)}", flush=True)
         return send_from_directory(_DIR, "index.html")
     except Exception as e:
-        print(f"[API] Error serving index.html: {e}", flush=True)
-        import traceback
-        traceback.print_exc()
         return f"Error: {e}", 500
 
 @app.route("/<path:filename>")
@@ -3545,7 +3528,6 @@ def cancel():
 
 @app.route("/api/credits")
 def get_credits():
-    print("[API] GET /api/credits", flush=True)
     try:
         services = {
             "apollo": {
@@ -3607,7 +3589,6 @@ def get_credits():
 
 @app.route("/api/credits/refresh", methods=["POST"])
 def refresh_credits():
-    print("[API] POST /api/credits/refresh", flush=True)
     try:
         services = {
             "apollo": {
@@ -3661,10 +3642,6 @@ def refresh_credits():
         return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-# Confirm routes are registered
-print(f"[V5] Routes registered: {len([r for r in app.url_map.iter_rules() if not str(r).startswith('/static')])}", flush=True)
-print("[V5] WSGI entry point ready!", flush=True)
 
 if __name__ == "__main__":
     main_web()
